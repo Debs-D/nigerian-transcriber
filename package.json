@@ -1,0 +1,21 @@
+{
+  "name": "nigerian-transcriber",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Upload audio/video and get accurate, speaker-labelled, timestamped transcripts (Nigerian English focused).",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "docx": "^9.16.0",
+    "express": "^5.3.0",
+    "ffmpeg-static": "^5.3.0",
+    "multer": "^2.5.0"
+  }
+}

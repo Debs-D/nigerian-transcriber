@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Transcriber</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23137a55'/><path d='M9 13v6M13 10v12M17 8v16M21 11v10M25 14v4' stroke='white' stroke-width='2.4' stroke-linecap='round'/></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor"/><path d="M9 13v6M13 10v12M17 8v16M21 11v10M25 14v4" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span>Transcriber</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. Upload -->
+    <section id="upload-view" class="card">
+      <h1>Turn recordings into text</h1>
+      <p class="lead">Upload audio or video up to 2 hours long. You'll get a word-for-word transcript with speakers and timestamps.</p>
+
+      <label id="dropzone" class="dropzone" tabindex="0">
+        <input id="file-input" type="file" accept=".mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.flac,.webm,.mov,.mkv,.wma,.amr,.3gp,audio/*,video/*" hidden />
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <strong>Drop a file here or <u>browse</u></strong>
+        <span class="muted">MP3, WAV, M4A, MP4 and other common formats</span>
+      </label>
+
+      <div id="file-card" class="file-card" hidden>
+        <div class="file-icon" aria-hidden="true">♪</div>
+        <div class="file-meta">
+          <div id="file-name" class="file-name"></div>
+          <div id="file-details" class="muted"></div>
+        </div>
+        <button id="file-clear" class="icon-btn" type="button" aria-label="Remove file">✕</button>
+      </div>
+
+      <div class="options">
+        <div class="field">
+          <label for="speakers">Number of speakers</label>
+          <select id="speakers">
+            <option value="auto" selected>Detect automatically</option>
+            <option value="1">1 (no speaker labels)</option>
+            <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+            <option value="5">5</option><option value="6">6</option><option value="7">7</option>
+            <option value="8">8</option><option value="9">9</option><option value="10">10</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="check">
+            <input id="verbatim" type="checkbox" checked />
+            <span>Keep filler words <span class="muted">(um, uh, false starts)</span></span>
+          </label>
+        </div>
+        <div class="field full">
+          <label for="keyterms">Names &amp; terms <span class="muted">(optional, improves accuracy)</span></label>
+          <textarea id="keyterms" rows="2" placeholder="e.g. Oluwaseun Adebayo, Chukwuemeka, Ikeja, Ogbomosho, NYSC, JAMB, Lekki-Epe Expressway"></textarea>
+          <small class="muted">People, places, organisations or jargon in the recording. Separate with commas or new lines.</small>
+        </div>
+      </div>
+
+      <p id="upload-error" class="error" hidden></p>
+      <button id="start-btn" class="btn primary block" type="button" disabled>Transcribe</button>
+    </section>
+
+    <!-- 2. Progress -->
+    <section id="progress-view" class="card center" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 id="progress-title">Uploading…</h2>
+      <p id="progress-detail" class="muted"></p>
+      <div class="bar"><div id="progress-bar" class="bar-fill"></div></div>
+      <p class="muted small" id="progress-elapsed"></p>
+      <p class="muted small">You can leave this tab open. A 2-hour recording usually takes a few minutes.</p>
+    </section>
+
+    <!-- 3. Error -->
+    <section id="error-view" class="card center" hidden>
+      <h2>Transcription failed</h2>
+      <p id="error-message" class="error"></p>
+      <button id="retry-btn" class="btn primary" type="button">Start over</button>
+    </section>
+
+    <!-- 4. Result -->
+    <section id="result-view" hidden>
+      <div class="result-head card">
+        <div class="result-title">
+          <h2 id="result-name"></h2>
+          <p id="result-meta" class="muted"></p>
+        </div>
+        <div class="actions">
+          <button id="copy-btn" class="btn" type="button">Copy</button>
+          <button id="txt-btn" class="btn" type="button">Download TXT</button>
+          <button id="docx-btn" class="btn" type="button">Download DOCX</button>
+          <button id="new-btn" class="btn ghost" type="button">New transcription</button>
+        </div>
+        <p id="result-warning" class="warning" hidden></p>
+        <div id="player-wrap" class="player-wrap" hidden></div>
+        <div id="speaker-names" class="speaker-names" hidden>
+          <span class="muted small">Rename speakers:</span>
+          <div id="speaker-inputs" class="speaker-inputs"></div>
+        </div>
+      </div>
+      <article id="transcript" class="card transcript"></article>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
