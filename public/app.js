@@ -17,7 +17,20 @@
     pollTimer: null,
     startedAt: 0,
     activeSeg: -1,
+    view: 'full', // 'full' | 'clean'
+    clean: null, // { status, error, progress, result } from the server
+    cleanAvailable: false,
+    cleanTimer: null,
   };
+
+  /** Segments of the version currently on screen. */
+  function currentSegments() {
+    if (state.view === 'clean') return state.clean?.result?.segments || [];
+    return state.result?.segments || [];
+  }
+  function versionSuffix() {
+    return state.view === 'clean' ? 'clean transcript' : 'transcript';
+  }
 
   // ---------- helpers ----------
   const ext = (name) => (name.split('.').pop() || '').toLowerCase();
@@ -155,8 +168,8 @@
   }
 
   const STAGES = {
-    preparing: ['Preparing audio…', 'Extracting the audio track.'],
-    uploading: ['Sending to the transcription service…', 'Large files can take a minute or two.'],
+    preparing: ['Preparing audio…', 'Making the file smaller so it uploads faster. A long recording can take a minute.'],
+    uploading: ['Sending to the transcription service…', 'This depends on your internet speed.'],
     queued: ['Queued…', 'Waiting for a transcription slot.'],
     processing: ['Transcribing…', 'Recognising speech, speakers and timestamps.'],
   };
@@ -178,7 +191,13 @@
         return fail(data.error || 'Transcription failed.');
       }
       const [title, detail] = STAGES[data.status] || ['Working…', ''];
-      setProgress(title, detail, null);
+      const up = data.uploadProgress;
+      if (data.status === 'uploading' && up?.total) {
+        const pct = Math.min(100, Math.round((up.sent / up.total) * 100));
+        setProgress(title, `${pct}% of ${formatBytes(up.total)} sent. ${detail}`, pct);
+      } else {
+        setProgress(title, detail, null);
+      }
     } catch {
       // network blip — keep polling
     }
@@ -221,12 +240,11 @@
     state.fileName = data.fileName || state.fileName;
     state.speakerNames = store(() => JSON.parse(localStorage.getItem(`transcriber.names.${data.id}`))) || {};
 
+    state.cleanAvailable = Boolean(data.cleanAvailable);
+    state.clean = data.clean || null;
+    state.view = 'full';
+
     $('result-name').textContent = state.fileName;
-    const meta = [];
-    if (r.durationSec) meta.push(formatDuration(r.durationSec));
-    meta.push(`${r.wordCount.toLocaleString()} words`);
-    if (r.speakers.length) meta.push(`${r.speakers.length} speaker${r.speakers.length > 1 ? 's' : ''}`);
-    $('result-meta').textContent = meta.join(' · ');
 
     const warn = $('result-warning');
     const warnings = [...(data.warnings || [])];
@@ -236,8 +254,94 @@
 
     renderPlayer();
     renderSpeakerInputs();
-    renderTranscript();
     show('result-view');
+    setView('full');
+    if (state.clean?.status === 'processing') pollClean();
+  }
+
+  function renderMeta() {
+    const r = state.result;
+    const meta = [];
+    if (r.durationSec) meta.push(formatDuration(r.durationSec));
+    if (state.view === 'clean' && state.clean?.result) {
+      const pct = r.wordCount ? Math.round((state.clean.result.wordCount / r.wordCount) * 100) : 0;
+      meta.push(`${state.clean.result.wordCount.toLocaleString()} words (${pct}% of the full ${r.wordCount.toLocaleString()})`);
+    } else {
+      meta.push(`${r.wordCount.toLocaleString()} words`);
+    }
+    if (r.speakers.length) meta.push(`${r.speakers.length} speaker${r.speakers.length > 1 ? 's' : ''}`);
+    $('result-meta').textContent = meta.join(' · ');
+  }
+
+  // ---------- full vs clean version ----------
+  function setView(view) {
+    state.view = view;
+    $('tab-full').setAttribute('aria-selected', String(view === 'full'));
+    $('tab-clean').setAttribute('aria-selected', String(view === 'clean'));
+    const ready = view === 'full' || state.clean?.status === 'completed';
+    $('clean-panel').hidden = ready;
+    $('transcript').hidden = !ready;
+    for (const id of ['copy-btn', 'txt-btn', 'docx-btn']) $(id).disabled = !ready;
+    renderMeta();
+    if (ready) renderTranscript();
+    else renderCleanPanel();
+  }
+
+  function renderCleanPanel() {
+    const c = state.clean;
+    const working = c?.status === 'processing';
+    $('clean-intro').hidden = working;
+    $('clean-working').hidden = !working;
+    const err = !state.cleanAvailable
+      ? 'The clean version is not available on this server.'
+      : c?.status === 'error' ? c.error : '';
+    $('clean-error').textContent = err;
+    $('clean-error').hidden = !err;
+    $('clean-start').disabled = !state.cleanAvailable;
+    $('clean-start').textContent = c?.status === 'error' ? 'Try again' : 'Create clean version';
+    if (working) {
+      const p = c.progress || {};
+      $('clean-progress').textContent = p.total > 1
+        ? `Part ${Math.min(p.done + 1, p.total)} of ${p.total} is being cleaned… A long recording can take a few minutes.`
+        : 'This usually takes a minute or two.';
+    }
+  }
+
+  $('tab-full').addEventListener('click', () => setView('full'));
+  $('tab-clean').addEventListener('click', () => setView('clean'));
+
+  $('clean-start').addEventListener('click', async () => {
+    $('clean-start').disabled = true;
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(state.jobId)}/clean`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not start the clean version.');
+      state.clean = data.clean;
+    } catch (e) {
+      state.clean = { status: 'error', error: e.message };
+    }
+    if (state.view === 'clean') setView('clean');
+    if (state.clean?.status === 'processing') pollClean();
+  });
+
+  async function pollClean() {
+    clearTimeout(state.cleanTimer);
+    const jobId = state.jobId;
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/clean`);
+      const data = await res.json().catch(() => ({}));
+      if (jobId !== state.jobId) return; // user started over
+      if (res.status === 404) {
+        state.clean = { status: 'error', error: data.error || 'This transcription has expired.' };
+      } else if (res.ok) {
+        state.clean = data.clean;
+      }
+    } catch {
+      // network blip — keep polling
+    }
+    if (state.view === 'clean') setView('clean');
+    if (state.clean?.status === 'processing') state.cleanTimer = setTimeout(pollClean, 3000);
+    else if (state.clean?.status === 'completed' && state.view !== 'clean') toast('Clean version is ready');
   }
 
   function renderPlayer() {
@@ -281,7 +385,7 @@
     const frag = document.createDocumentFragment();
     let prevSpeaker;
     state.activeSeg = -1;
-    state.result.segments.forEach((seg, i) => {
+    currentSegments().forEach((seg, i) => {
       const row = document.createElement('div');
       row.className = 'seg';
       row.dataset.index = i;
@@ -321,8 +425,8 @@
   }
 
   function highlightAt(ms) {
-    const segs = state.result?.segments;
-    if (!segs?.length) return;
+    const segs = currentSegments();
+    if (!segs.length || $('transcript').hidden) return;
     // binary search for last segment starting at or before ms
     let lo = 0, hi = segs.length - 1, idx = -1;
     while (lo <= hi) {
@@ -343,7 +447,7 @@
   // ---------- export ----------
   function buildTxt() {
     const lines = [];
-    for (const seg of state.result.segments) {
+    for (const seg of currentSegments()) {
       const label = speakerLabel(seg.speaker);
       lines.push(`[${formatTimestamp(seg.start)}] ${label ? label + ': ' : ''}${seg.text}`);
     }
@@ -372,11 +476,11 @@
       document.execCommand('copy');
       ta.remove();
     }
-    toast('Transcript copied');
+    toast(state.view === 'clean' ? 'Clean version copied' : 'Transcript copied');
   });
 
   $('txt-btn').addEventListener('click', () => {
-    download(new Blob([buildTxt()], { type: 'text/plain;charset=utf-8' }), `${baseName(state.fileName)} - transcript.txt`);
+    download(new Blob([buildTxt()], { type: 'text/plain;charset=utf-8' }), `${baseName(state.fileName)} - ${versionSuffix()}.txt`);
   });
 
   $('docx-btn').addEventListener('click', async () => {
@@ -390,12 +494,12 @@
         body: JSON.stringify({
           title: baseName(state.fileName),
           subtitle: $('result-meta').textContent,
-          segments: state.result.segments,
+          segments: currentSegments(),
           speakerNames: state.speakerNames,
         }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Export failed');
-      download(await res.blob(), `${baseName(state.fileName)} - transcript.docx`);
+      download(await res.blob(), `${baseName(state.fileName)} - ${versionSuffix()}.docx`);
     } catch (e) {
       toast(e.message || 'Could not create the DOCX file');
     } finally {
@@ -407,11 +511,12 @@
   // ---------- reset ----------
   function reset() {
     clearTimeout(state.pollTimer);
+    clearTimeout(state.cleanTimer);
     clearInterval(elapsedTimer);
     store(() => localStorage.removeItem(STORAGE_KEY));
     if (state.media) state.media.pause();
     if (state.mediaUrl) URL.revokeObjectURL(state.mediaUrl);
-    Object.assign(state, { jobId: null, result: null, mediaUrl: null, media: null, speakerNames: {}, activeSeg: -1 });
+    Object.assign(state, { jobId: null, result: null, mediaUrl: null, media: null, speakerNames: {}, activeSeg: -1, view: 'full', clean: null });
     $('transcript').replaceChildren();
     $('player-wrap').replaceChildren();
     clearFile();

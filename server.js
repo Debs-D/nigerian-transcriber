@@ -10,6 +10,7 @@ import { uploadFile, submitTranscript, getTranscript } from './lib/assemblyai.js
 import { buildSegments } from './lib/format.js';
 import { buildDocx } from './lib/docx.js';
 import { prepareMedia } from './lib/media.js';
+import { buildCleanVersion, cleanVersionAvailable } from './lib/condense.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -87,7 +88,10 @@ async function processJob(job, file, options) {
     toDelete.push(...media.generated);
 
     job.status = 'uploading';
-    const audioUrl = await uploadFile(API_KEY, media.path);
+    const audioUrl = await uploadFile(API_KEY, media.path, (sent, total) => {
+      job.uploadProgress = { sent, total };
+    });
+    job.uploadProgress = null;
     await removeQuietly(toDelete); // free disk as soon as the service has the audio
 
     job.status = 'queued';
@@ -165,9 +169,50 @@ app.get('/api/jobs/:id', async (req, res) => {
     status: job.status,
     error: job.error,
     warnings: job.warnings,
+    uploadProgress: job.status === 'uploading' ? job.uploadProgress ?? null : null,
     createdAt: job.createdAt,
     result: job.status === 'completed' ? job.result : null,
+    cleanAvailable: cleanVersionAvailable(),
+    clean: publicClean(job.clean),
   });
+});
+
+function publicClean(clean) {
+  if (!clean) return null;
+  const { status, error, progress, result } = clean;
+  return { status, error, progress, result: status === 'completed' ? result : null };
+}
+
+app.get('/api/jobs/:id/clean', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) throw new HttpError(404, 'This transcription was not found. It may have expired or the server was restarted.');
+  res.json({ clean: publicClean(job.clean) });
+});
+
+// Start (or restart after an error) the shorter, cleaned-up version of a finished transcript.
+app.post('/api/jobs/:id/clean', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) throw new HttpError(404, 'This transcription was not found. It may have expired or the server was restarted.');
+  if (job.status !== 'completed') throw new HttpError(409, 'The transcript is not ready yet.');
+  if (!cleanVersionAvailable()) {
+    throw new HttpError(503, 'The clean version is not available on this server.');
+  }
+  if (!job.clean || job.clean.status === 'error') {
+    const clean = { status: 'processing', error: null, progress: { done: 0, total: 0 }, result: null };
+    job.clean = clean;
+    buildCleanVersion(job.result.segments, (done, total) => { clean.progress = { done, total }; })
+      .then((result) => {
+        clean.result = result;
+        clean.status = 'completed';
+        console.log(`[job ${job.id}] clean version ready (${result.wordCount} words, from ${job.result.wordCount})`);
+      })
+      .catch((err) => {
+        console.error(`[job ${job.id}] clean version failed:`, err);
+        clean.status = 'error';
+        clean.error = err.userFacing ? err.message : 'Something went wrong while making the clean version. Please try again.';
+      });
+  }
+  res.status(202).json({ clean: publicClean(job.clean) });
 });
 
 app.post('/api/export/docx', express.json({ limit: '20mb' }), async (req, res) => {

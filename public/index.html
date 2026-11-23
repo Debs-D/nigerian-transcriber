@@ -89,6 +89,10 @@
           <h2 id="result-name"></h2>
           <p id="result-meta" class="muted"></p>
         </div>
+        <div id="version-tabs" class="tabs" role="tablist" aria-label="Transcript version">
+          <button id="tab-full" class="tab" type="button" role="tab" aria-selected="true">Full transcript</button>
+          <button id="tab-clean" class="tab" type="button" role="tab" aria-selected="false">Shorter, clean version</button>
+        </div>
         <div class="actions">
           <button id="copy-btn" class="btn" type="button">Copy</button>
           <button id="txt-btn" class="btn" type="button">Download TXT</button>
@@ -101,6 +105,19 @@
           <span class="muted small">Rename speakers:</span>
           <div id="speaker-inputs" class="speaker-inputs"></div>
         </div>
+      </div>
+      <div id="clean-panel" class="card center clean-panel" hidden>
+        <div id="clean-intro">
+          <h2>Shorter, clean version</h2>
+          <p class="muted">Keeps the whole message: every point, explanation, example, illustration and Bible reference, in the speaker's own voice. Removes filler words, repeated statements and phrases that add nothing. It is not a summary.</p>
+          <button id="clean-start" class="btn primary" type="button">Create clean version</button>
+        </div>
+        <div id="clean-working" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <h2>Cleaning up the transcript…</h2>
+          <p id="clean-progress" class="muted">This usually takes a minute or two.</p>
+        </div>
+        <p id="clean-error" class="error" hidden></p>
       </div>
       <article id="transcript" class="card transcript"></article>
     </section>
